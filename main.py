@@ -1,5 +1,8 @@
 from tabulate import tabulate
 import random
+from pysat.formula import CNF
+from pysat.solvers import Solver
+
 
 def preference_logic_menu():
     preferences = ['Penalty Logic', 'Qualitative Choice Logic', 'exit']
@@ -17,137 +20,80 @@ def preference_logic_menu():
     print(f"\nYou picked {preferences[choice-1]}\n")
     return choice, preferences[choice-1]
 
-def check_feaibility(items_arr, constraints):
-    feasible_num = 0
-    feasible_items = []
-    constraints = constraints.replace("NOT", "")
+def check_feaibility(items_arr, constraints_dict, constraints):
+    feasible_items = items_arr 
 
-    if "OR" in constraints:
-        constraints_arr = constraints.split('OR')
-        constraints_arr = [item.strip(' ') for item in constraints_arr]
-        for item in items_arr:
-            if not constraints_arr[0] in item or not constraints_arr[1] in item:
-                feasible_items.append(item)
-                feasible_num +=1
+    for constraint in constraints:
+        arr = constraint.split("OR")
         
-        print(f"Yes, there are {feasible_num} objects")
-            
-    elif "AND" in constraints:
-        constraints_arr = constraints.split("AND")
-        constraints_arr = [item.strip(' ') for item in constraints_arr]
-        for item in items_arr:
-            if not constraints_arr[0] in item and not constraints_arr[1] in item:
-                feasible_items.append(item)
-                feasible_num +=1
-        print(f"Yes, there are {feasible_num} objects")
+        if "NOT" in arr[0] and "NOT" in arr[1]:
+            constraint1 = arr[0][4:].strip()
+            constraint2 = arr[1][4:].strip()
+
+            feasible_items = [line for line in feasible_items
+                               if (constraint1 in line and constraint2 not in line) or
+                               (constraint2 in line and constraint1 not in line) or
+                               (constraint1 not in line and constraint2 not in line)]
+        
+        elif "NOT" in arr[0] and "NOT" not in arr[1]:
+            constraint1 = arr[0][4:].strip()
+            constraint2 = arr[1].strip()
+
+            # Filter out the infeasible items based on the current constraint
+            feasible_items = [line for line in feasible_items
+                               if (constraint1 in line and constraint2 in line)]
+    
     return feasible_items
+
     
 def show_the_table(preference_file, feasible_items):
     preference_items = preference_file.split('\n')
+    min_penalty = float('inf') # this is used for the exemplificatio. 
 
-    headers = ['encoding', preference_items[0].split(',')[0], preference_items[1].split(',')[0], 'total penalty']
+    headers = ['encoding']
+    for preference in preference_items:
+            headers.append(preference[:preference.find(',')])
+    headers.append("total_penalty")
+
     table_data = []
-    penalty1 = preference_items[0].split(',')[0].split('AND')
-    penalty2 = preference_items[1].split(',')[0].split('OR')
-    for line in feasible_items:
-        data = []
-        total_pen = 0
-        pen1 = 0
-        pen2 = 0
-        encode = line.split('-')
-        data.append(encode[0])
-        if not all(word.strip(' ') in line for word in penalty1):
-            pen1 = 10
-            data.append(pen1)
-        else:
-            pen1 = 0
-            data.append(pen1)
-        
-        if not any(word.strip(' ') in line for word in penalty2):
-            pen2 = 6
-            data.append(pen2)
-        else:
-            pen2 = 0
-            data.append(pen2)
+    for item in feasible_items:
+        total_penalty = 0
+        data = [item.split(' - ')[0]]  
+    
+        for preference in preference_items:
+            parts = preference.split()
+            if len(parts) < 4:
+                continue  
 
-        total_pen = pen2 + pen1
-        data.append(total_pen)
+            condition1, operator, condition2, penalty = parts
+            penalty = int(penalty)
+
+            if operator == "AND":
+                if condition1 in item and condition2 in item:
+                    data.append(0)
+                else:
+                    data.append(penalty)
+                    total_penalty += penalty
+
+            elif operator == "OR":
+                if condition1 in item or condition2 in item:
+                    data.append(0)
+                else:
+                    data.append(penalty)
+                    total_penalty += penalty
+        if total_penalty < min_penalty:
+            min_penalty = total_penalty
+            min_encode= item
+        data.append(total_penalty)  # Append total penalty at the end
         table_data.append(data)
-
-    print(tabulate(table_data, headers, tablefmt='grid'))
-    table_data = []
+    
+    # print(tabulate(table_data, headers=headers, tablefmt='grid'))
+    return table_data, headers, min_encode
 
 def exemplify(feasible_items, qualitative_file):
-    while True:
-        two_sample_items = random.sample(feasible_items, 2)
-        if two_sample_items[0] != two_sample_items[1]:
-            break
+    pass
     
-    sample_item1 = two_sample_items[0].split(' - ')[1].split(',')
-    sample_item2 = two_sample_items[1].split(' - ')[1].split(',')
-    sample_item1 = [i.strip(' ') for i in sample_item1]
-    sample_item2 = [i.strip(' ') for i in sample_item2]
-    preferred_option = ""
-    unpreferred_option = ""
-    if sample_item1[2] == 'beef' and sample_item2[2] == 'beef':  
-    # Both have beef → Apply Beer > Wine rule  
-        if sample_item1[1] == 'wine' and sample_item2[1] == 'wine':  
-            # Both have wine → Compare Ice-cream vs Cake  
-            if sample_item1[0] == 'ice-cream' and sample_item2[0] == 'cake':  
-                preferred_option = two_sample_items[0]  
-                unpreferred_option = two_sample_items[1]
-            elif sample_item1[0] == 'cake' and sample_item2[0] == 'ice-cream':  
-                preferred_option = two_sample_items[1]  
-                unpreferred_option = two_sample_items[0]
-            else:  
-                preferred_option = two_sample_items[0]  # Default to first if tie  
-                unpreferred_option = two_sample_items[1]
-        elif sample_item1[1] == 'beer' and sample_item2[1] == 'wine':  
-            preferred_option = two_sample_items[0]  # Beer > Wine (since beef exists)  
-            unpreferred_option = two_sample_items[1]
-        elif sample_item1[1] == 'wine' and sample_item2[1] == 'beer':  
-            preferred_option = two_sample_items[1]    # Beer > Wine (since beef exists)  
-            unpreferred_option = two_sample_items[0]
-        else:  
-            preferred_option = two_sample_items[0]  # Default if tie  
-            unpreferred_option = two_sample_items[1]
-
-    elif sample_item1[2] == 'fish' and sample_item2[2] == 'beef':  
-        preferred_option = two_sample_items[0]  # Fish > Beef  
-        unpreferred_option = two_sample_items[1]
-
-    elif sample_item1[2] == 'beef' and sample_item2[2] == 'fish':  
-        preferred_option = two_sample_items[1]    # Fish > Beef  
-        unpreferred_option = two_sample_items[0]
-
-    elif sample_item1[0] == 'ice-cream' and sample_item2[0] == 'cake':  
-        preferred_option = two_sample_items[0]  # Ice-cream > Cake  
-        unpreferred_option = two_sample_items[1]
-
-    elif sample_item1[0] == 'cake' and sample_item2[0] == 'ice-cream':  
-        preferred_option = two_sample_items[1]    # Ice-cream > Cake  
-        unpreferred_option = two_sample_items[0]
-
-    elif sample_item1[2] == 'fish' and sample_item2[2] == 'fish':  
-        if sample_item1[1] == 'wine' and sample_item2[1] == 'beer':  
-            preferred_option = two_sample_items[0]  # Wine > Beer (if fish exists)  
-            unpreferred_option = two_sample_items[1]
-        elif sample_item1[1] == 'beer' and sample_item2[1] == 'wine':  
-            preferred_option = two_sample_items[1]    # Wine > Beer (if fish exists)  
-            unpreferred_option = two_sample_items[0]
-        else:  
-            preferred_option = two_sample_items[0]  # Default if tie  
-            unpreferred_option = two_sample_items[1]
-
-    else:  
-        preferred_option = two_sample_items[0]  # Default fallback  
-        unpreferred_option = two_sample_items[1]
-    
-    print(f"The randomly selected feasible objects are {two_sample_items[0].split('-')[0]} and {two_sample_items[1].split('-')[0]}, \n and {preferred_option.split('-')[0]} is strictly preferred over {unpreferred_option.split('-')[0]}")
-
-
-    
-def choose_reasoning(attribute_file, constraints, preference_file, qualitative_file):
+def choose_reasoning(attribute_file, constraints, preference_file):
     
     reasoning_arr = ['Encoding', 'Feasibility Checking', 'Show the Table', 'Exemplification'
                     ,'Omni-optimization', 'Back to previous menu']
@@ -165,51 +111,84 @@ def choose_reasoning(attribute_file, constraints, preference_file, qualitative_f
         if choice <1 or choice > 6:
             print("Invalid choice, try again.")
 
-        attributes_arr= attribute_file.split('\n')
-        dessert_arr = attributes_arr[0].split(':')[1:][0].strip("'").split(',')
-        dessert_arr.reverse()
-        drink_arr = attributes_arr[1].split(':')[1:][0].strip("'").split(',')
-        drink_arr.reverse()
-        main_arr = attributes_arr[2].split(":")[1:][0].strip("'").split(',')
-        main_arr.reverse()
+        # encode the attributes file with PySat with their respective CNFs
+        attribute_file_items =[]
+        for i in range(len(attribute_file)):
+            attribute_file_items.append(attribute_file[i].split(':')[1].split(','))
 
-        counter= 0
-        items_arr = []
-        for des_i in range(len(dessert_arr)):
-            for drk_i in range(len(drink_arr)):
-                for main_i in range(len(main_arr)):
-                    str = (f"o{counter} - {dessert_arr[des_i]}, {drink_arr[drk_i]}, {main_arr[main_i]}")
-                    counter+=1
-                    items_arr.append(str)
-        counter = 0
-            
+        cnf = []
+        cnf_dict= {}
+        constraints_dict = {}
+        constraints_arr = []
+
+        for i in range(len(attribute_file)):
+            cnf.append([i+1, -1*(i+1)])
+            item1 = attribute_file_items[i][0].strip(" ").strip("\n")
+            item2 = attribute_file_items[i][1].strip(" ").strip("\n")
+            cnf_dict[i+1] = item1
+            cnf_dict[-1*(i+1)] = item2
+
+            for constraint in  constraints:
+                constraints_arr = constraint.split(" ")
+                if item1 in constraints_arr:
+                    constraints_dict[item1] = i+1
+                elif item2 in constraints_arr:
+                    constraints_dict[item2] = -1*(i+1)
+
+        
+        encoding_arr = []
+        with Solver(bootstrap_with=cnf) as solver:
+            for m in solver.enum_models():
+                encoding_arr.append(m)
+        encode_string_arr = []
+        for i in range(len(encoding_arr)):
+            encode_string= ""
+            encoding= encoding_arr[i]
+            for k in range(len(encoding)-1):
+                encode_string += f"{cnf_dict[encoding[k]]}, "
+            encode_string += f"{cnf_dict[encoding[len(encoding)-1]]}"
+            encode_string_arr.append(f"o{i} - {encode_string}")
+
+        feasible_items = check_feaibility(encode_string_arr, constraints_dict, constraints)
+        data_table, headers, min_encode = show_the_table(preference_file, feasible_items)
         if choice == 1:
-           for item in items_arr:
+           for item in encode_string_arr:
                print(item)
-            
+        
         if choice == 2:
-           feasible_items = check_feaibility(items_arr, constraints)
+           print(f"Yes, there are {len(feasible_items)} feasible items.")
 
         if choice == 3:
-            show_the_table(preference_file, feasible_items)
+            print(tabulate(data_table, headers, tablefmt='grid'))
         
         if choice == 4:
-            exemplify(feasible_items, qualitative_file)
+            two_rand_samples = random.sample(data_table, 2)
+            sample1 = two_rand_samples[0]
+            sample2 = two_rand_samples[1]
+            preferred = sample1[0] if int(sample1[3]) < int(sample2[3]) else sample2[0]
+            unpreferred = sample1[0] if int(sample1[3]) > int(sample2[3]) else sample2[0]
+
+            print(f"Two randomly selected feasible objects are {sample1[0]} and {sample2[0]},\n and {preferred} is strictly preferred over {unpreferred}")
+
         
         if choice == 5:
-            exemplify(feasible_items, qualitative_file)
+            print(f"All optimal objects: {min_encode.split(' - ')[0]}")
+            # exemplify(feasible_items)
                         
 
 
 def main():
     print("Welcome to PrefAgent !")
+    cnf = []
     while True:
         attribute_filename = input("Enter Attributes File Name: ")
         try:
             with open(f"../data/{attribute_filename}", 'r') as file:
-                attribute_file = file.read()
+                attribute_file = file.readlines()
             if file:
                 break
+            for i in range(len(attribute_file)):
+                cnf.append([i+1, -1*(i+1)])
         except:
             print("Wrong file name, try again.")
         
@@ -217,26 +196,18 @@ def main():
         try:
             hard_constraint_filename = input("Enter Hard Constraints File Name: ")
             with open (f"../data/{hard_constraint_filename}", 'r') as file:
-                hard_file = file.read()
+                hard_file = file.readlines()
             if file:
                 break
         except:
             print("Wrong file name, try again.")   
   
-    try:
-        qualittivechoicelogic_filename = "../data/qualitativechoicelogic.txt"
-        with open(qualittivechoicelogic_filename, 'r') as file:
-            qualitative_file = file.read()
-    except:
-        print("qualitative file is not found, please make sure to have it in the correct path.")
-
-
     preference_logic_choice_num, preference_str = preference_logic_menu()
 
     if preference_logic_choice_num == 1:
         while True:
             try:
-                preference_filename = input("Enter Hard Constraints File Name: ")
+                preference_filename = input("Enter Preferences File Name: ")
                 with open (f"../data/{preference_filename}", 'r') as file:
                     preference_file = file.read()
                 if file:
@@ -244,7 +215,7 @@ def main():
             except:
                 print("Wrong file name, try again.")           
         
-        choose_reasoning(attribute_file, hard_file, preference_file, qualitative_file)
+        choose_reasoning(attribute_file, hard_file, preference_file)
 
 
 if __name__ == "__main__":
